@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 服务导航系统 - 统一生产环境管理脚本
-# 支持 start, stop, restart, status 等操作
+# 支持前后端一起启动
 
 set -e
 
@@ -17,38 +17,47 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_ROOT"
 
 # PID文件和日志文件路径
-PID_FILE="$PROJECT_ROOT/.service-nav.pid"
-LOG_FILE="$PROJECT_ROOT/service-nav.log"
+FRONTEND_PID_FILE="$PROJECT_ROOT/.service-nav-frontend.pid"
+BACKEND_PID_FILE="$PROJECT_ROOT/.service-nav-backend.pid"
+FRONTEND_LOG_FILE="$PROJECT_ROOT/service-nav-frontend.log"
+BACKEND_LOG_FILE="$PROJECT_ROOT/service-nav-backend.log"
 
 # 默认端口
-DEFAULT_PORT=80
-PORT=$DEFAULT_PORT
+DEFAULT_FRONTEND_PORT=80
+DEFAULT_BACKEND_PORT=8000
+FRONTEND_PORT=$DEFAULT_FRONTEND_PORT
+BACKEND_PORT=$DEFAULT_BACKEND_PORT
 FORCE_BUILD=false
+ENABLE_BACKEND=true
+ENABLE_FRONTEND=true
 
 # 显示帮助信息
 show_help() {
     echo "使用方法: $0 {start|stop|restart|status} [选项]"
     echo ""
     echo "命令:"
-    echo "  start    启动服务"
+    echo "  start    启动服务（默认同时启动前后端）"
     echo "  stop     停止服务"
     echo "  restart  重启服务"
     echo "  status   查看服务状态"
     echo ""
     echo "选项:"
-    echo "  --port PORT    指定端口号 (默认: 80)"
-    echo "  --build        强制重新构建 (仅用于 start/restart)"
-    echo "  --daemon       后台运行模式 (仅用于 start/restart)"
-    echo "  --help         显示帮助信息"
+    echo "  --frontend-port PORT   前端端口 (默认: 80)"
+    echo "  --backend-port PORT    后端端口 (默认: 8000)"
+    echo "  --frontend-only        仅启动前端"
+    echo "  --backend-only         仅启动后端"
+    echo "  --build                强制重新构建前端"
+    echo "  --daemon               后台运行模式"
+    echo "  --help                 显示帮助信息"
     echo ""
     echo "示例:"
-    echo "  $0 start                  # 前台启动服务，使用默认端口80"
-    echo "  $0 start --daemon         # 后台启动服务"
-    echo "  $0 start --port 8080      # 使用8080端口启动"
-    echo "  $0 start --build          # 重新构建并启动"
-    echo "  $0 stop                   # 停止服务"
-    echo "  $0 restart                # 重启服务"
-    echo "  $0 status                 # 查看服务状态"
+    echo "  $0 start                        # 同时启动前后端"
+    echo "  $0 start --daemon               # 后台启动前后端"
+    echo "  $0 start --frontend-only        # 仅启动前端"
+    echo "  $0 start --backend-only         # 仅启动后端"
+    echo "  $0 start --frontend-port 3000   # 指定前端端口"
+    echo "  $0 stop                         # 停止所有服务"
+    echo "  $0 status                       # 查看服务状态"
 }
 
 # 检查是否以root权限运行（80端口需要）
@@ -56,7 +65,7 @@ check_sudo() {
     if [ "$1" == "80" ] && [ "$EUID" -ne 0 ]; then
         echo -e "${RED}错误: 80端口需要管理员权限${NC}"
         echo -e "${YELLOW}请使用: sudo $0 $COMMAND [选项]${NC}"
-        echo -e "${YELLOW}或使用其他端口: $0 $COMMAND --port 8080${NC}"
+        echo -e "${YELLOW}或使用其他端口: $0 $COMMAND --frontend-port 8080${NC}"
         exit 1
     fi
 }
@@ -64,22 +73,48 @@ check_sudo() {
 # 检查端口是否被占用
 check_port() {
     local PORT=$1
+    local SERVICE=$2
     if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
         local PID=$(lsof -Pi :$PORT -sTCP:LISTEN -t 2>/dev/null | head -1)
         # 检查是否是我们自己的服务
-        if [ -f "$PID_FILE" ] && [ "$(cat $PID_FILE)" == "$PID" ]; then
+        if [ "$SERVICE" == "frontend" ] && [ -f "$FRONTEND_PID_FILE" ] && [ "$(cat $FRONTEND_PID_FILE)" == "$PID" ]; then
             return 0
         fi
-        echo -e "${RED}错误: 端口 $PORT 已被占用${NC}"
+        if [ "$SERVICE" == "backend" ] && [ -f "$BACKEND_PID_FILE" ] && [ "$(cat $BACKEND_PID_FILE)" == "$PID" ]; then
+            return 0
+        fi
+        echo -e "${RED}错误: 端口 $PORT 已被占用 ($SERVICE)${NC}"
         echo -e "${YELLOW}当前占用进程:${NC}"
         lsof -Pi :$PORT -sTCP:LISTEN
         return 1
     fi
 }
 
-# 检查依赖
-check_dependencies() {
-    echo -e "${YELLOW}检查依赖...${NC}"
+# 检查Python依赖（后端）
+check_python_dependencies() {
+    echo -e "${YELLOW}检查Python依赖...${NC}"
+    
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}错误: 未找到 Python3${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✓ Python: $(python3 --version)${NC}"
+    
+    # 检查虚拟环境
+    if [ ! -d "backend/venv" ]; then
+        echo -e "${YELLOW}创建Python虚拟环境...${NC}"
+        cd backend
+        python3 -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
+        cd ..
+    fi
+}
+
+# 检查Node依赖（前端）
+check_node_dependencies() {
+    echo -e "${YELLOW}检查Node.js依赖...${NC}"
     
     if ! command -v node &> /dev/null; then
         echo -e "${RED}错误: 未找到 Node.js${NC}"
@@ -95,13 +130,36 @@ check_dependencies() {
     echo -e "${GREEN}✓ npm: $(npm --version)${NC}"
 }
 
-# 安装依赖
-install_dependencies() {
+# 安装后端依赖
+install_backend_dependencies() {
+    if [ ! -d "backend" ]; then
+        echo -e "${YELLOW}后端目录不存在，跳过后端设置${NC}"
+        ENABLE_BACKEND=false
+        return
+    fi
+    
+    echo -e "${YELLOW}安装后端依赖...${NC}"
+    cd backend
+    
+    if [ -f "requirements.txt" ]; then
+        source venv/bin/activate
+        pip install -r requirements.txt
+        echo -e "${GREEN}✓ 后端依赖安装完成${NC}"
+    else
+        echo -e "${YELLOW}未找到 requirements.txt，跳过后端依赖安装${NC}"
+    fi
+    
+    cd ..
+}
+
+# 安装前端依赖
+install_frontend_dependencies() {
+    echo -e "${YELLOW}安装前端依赖...${NC}"
+    
     if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}安装依赖...${NC}"
         npm install
     else
-        echo -e "${GREEN}✓ 依赖已存在${NC}"
+        echo -e "${GREEN}✓ 前端依赖已存在${NC}"
     fi
     
     if ! command -v serve &> /dev/null; then
@@ -112,21 +170,21 @@ install_dependencies() {
     fi
 }
 
-# 构建生产版本
-build_production() {
-    echo -e "${YELLOW}检查生产构建...${NC}"
+# 构建前端生产版本
+build_frontend() {
+    echo -e "${YELLOW}检查前端生产构建...${NC}"
     
     if [ ! -d "dist" ] || [ "$FORCE_BUILD" == "true" ]; then
-        echo -e "${YELLOW}构建生产版本...${NC}"
+        echo -e "${YELLOW}构建前端生产版本...${NC}"
         npm run build
         
         if [ ! -d "dist" ]; then
-            echo -e "${RED}错误: 构建失败${NC}"
+            echo -e "${RED}错误: 前端构建失败${NC}"
             exit 1
         fi
-        echo -e "${GREEN}✓ 构建完成${NC}"
+        echo -e "${GREEN}✓ 前端构建完成${NC}"
     else
-        echo -e "${GREEN}✓ 生产构建已存在${NC}"
+        echo -e "${GREEN}✓ 前端生产构建已存在${NC}"
         echo -e "${YELLOW}提示: 使用 --build 参数强制重新构建${NC}"
     fi
 }
@@ -150,104 +208,211 @@ get_local_ip() {
     fi
 }
 
-# 启动服务（前台模式）
-start_foreground() {
-    local PORT=$1
-    echo -e "${YELLOW}启动前台服务 (端口 $PORT)...${NC}"
-    
-    get_local_ip
-    
-    echo ""
-    echo -e "${GREEN}===========================================${NC}"
-    echo -e "${GREEN}         服务启动成功！${NC}"
-    echo -e "${GREEN}===========================================${NC}"
-    echo ""
-    echo -e "${BLUE}访问地址:${NC}"
-    echo -e "  本机访问: ${GREEN}http://localhost:$PORT${NC}"
-    if [ "$LOCAL_IP" != "localhost" ]; then
-        echo -e "  局域网访问: ${GREEN}http://$LOCAL_IP:$PORT${NC}"
+# 启动后端服务（后台）
+start_backend_daemon() {
+    if [ "$ENABLE_BACKEND" != "true" ]; then
+        return
     fi
-    echo ""
-    echo -e "${YELLOW}服务运行中... (按 Ctrl+C 停止)${NC}"
-    echo ""
     
-    # 启动服务器
-    npx serve -s dist -l $PORT
-}
-
-# 启动服务（后台模式）
-start_daemon() {
-    local PORT=$1
-    echo -e "${YELLOW}启动后台服务 (端口 $PORT)...${NC}"
+    if [ ! -d "backend" ]; then
+        echo -e "${YELLOW}后端目录不存在，跳过后端启动${NC}"
+        return
+    fi
     
-    # 启动serve并将输出重定向到日志文件
-    nohup npx serve -s dist -l $PORT > "$LOG_FILE" 2>&1 &
+    echo -e "${YELLOW}启动后端服务 (端口 $BACKEND_PORT)...${NC}"
+    
+    cd backend
+    source venv/bin/activate
+    
+    # 启动FastAPI后端
+    nohup python -m uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT --reload > "$BACKEND_LOG_FILE" 2>&1 &
     local PID=$!
     
     # 保存PID
-    echo $PID > "$PID_FILE"
+    echo $PID > "$BACKEND_PID_FILE"
+    
+    cd ..
+    
+    # 等待服务启动
+    sleep 3
+    
+    # 检查服务是否成功启动
+    if ps -p $PID > /dev/null; then
+        echo -e "${GREEN}✓ 后端服务已启动 (PID: $PID)${NC}"
+    else
+        echo -e "${RED}错误: 后端服务启动失败${NC}"
+        echo -e "${YELLOW}查看日志: tail -f $BACKEND_LOG_FILE${NC}"
+        rm -f "$BACKEND_PID_FILE"
+        return 1
+    fi
+}
+
+# 启动前端服务（后台）
+start_frontend_daemon() {
+    if [ "$ENABLE_FRONTEND" != "true" ]; then
+        return
+    fi
+    
+    echo -e "${YELLOW}启动前端服务 (端口 $FRONTEND_PORT)...${NC}"
+    
+    # 启动前端服务
+    nohup npx serve -s dist -l $FRONTEND_PORT > "$FRONTEND_LOG_FILE" 2>&1 &
+    local PID=$!
+    
+    # 保存PID
+    echo $PID > "$FRONTEND_PID_FILE"
     
     # 等待服务启动
     sleep 2
     
     # 检查服务是否成功启动
     if ps -p $PID > /dev/null; then
-        echo -e "${GREEN}✓ 服务已在后台启动${NC}"
-        echo -e "${GREEN}PID: $PID${NC}"
-        echo -e "${GREEN}日志文件: $LOG_FILE${NC}"
-        
-        get_local_ip
-        
-        echo ""
-        echo -e "${GREEN}===========================================${NC}"
-        echo -e "${GREEN}         后台服务启动成功！${NC}"
-        echo -e "${GREEN}===========================================${NC}"
-        echo ""
-        echo -e "${BLUE}访问地址:${NC}"
-        echo -e "  本机访问: ${GREEN}http://localhost:$PORT${NC}"
-        if [ "$LOCAL_IP" != "localhost" ]; then
-            echo -e "  局域网访问: ${GREEN}http://$LOCAL_IP:$PORT${NC}"
-        fi
-        echo ""
-        echo -e "${BLUE}服务管理:${NC}"
-        echo -e "  查看状态: ${YELLOW}$0 status${NC}"
-        echo -e "  查看日志: ${YELLOW}tail -f $LOG_FILE${NC}"
-        echo -e "  停止服务: ${YELLOW}$0 stop${NC}"
-        echo -e "  重启服务: ${YELLOW}$0 restart${NC}"
-        echo ""
+        echo -e "${GREEN}✓ 前端服务已启动 (PID: $PID)${NC}"
     else
-        echo -e "${RED}错误: 服务启动失败${NC}"
-        echo -e "${YELLOW}查看日志: tail -f $LOG_FILE${NC}"
-        rm -f "$PID_FILE"
-        exit 1
+        echo -e "${RED}错误: 前端服务启动失败${NC}"
+        echo -e "${YELLOW}查看日志: tail -f $FRONTEND_LOG_FILE${NC}"
+        rm -f "$FRONTEND_PID_FILE"
+        return 1
     fi
+}
+
+# 启动前端服务（前台）
+start_frontend_foreground() {
+    if [ "$ENABLE_FRONTEND" != "true" ]; then
+        return
+    fi
+    
+    echo -e "${YELLOW}启动前端服务 (端口 $FRONTEND_PORT)...${NC}"
+    
+    get_local_ip
+    
+    echo ""
+    echo -e "${GREEN}===========================================${NC}"
+    echo -e "${GREEN}         前端服务启动成功！${NC}"
+    echo -e "${GREEN}===========================================${NC}"
+    echo ""
+    echo -e "${BLUE}前端访问地址:${NC}"
+    echo -e "  本机访问: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+    if [ "$LOCAL_IP" != "localhost" ]; then
+        echo -e "  局域网访问: ${GREEN}http://$LOCAL_IP:$FRONTEND_PORT${NC}"
+    fi
+    
+    if [ "$ENABLE_BACKEND" == "true" ] && [ -d "backend" ]; then
+        echo ""
+        echo -e "${BLUE}后端API地址:${NC}"
+        echo -e "  本机访问: ${GREEN}http://localhost:$BACKEND_PORT${NC}"
+        echo -e "  API文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}前端服务运行中... (按 Ctrl+C 停止)${NC}"
+    echo ""
+    
+    # 启动前端服务器
+    npx serve -s dist -l $FRONTEND_PORT
 }
 
 # 启动服务
 do_start() {
-    # 检查是否已经在运行
-    if [ -f "$PID_FILE" ]; then
-        OLD_PID=$(cat "$PID_FILE")
+    # 检查前端是否已经在运行
+    if [ "$ENABLE_FRONTEND" == "true" ] && [ -f "$FRONTEND_PID_FILE" ]; then
+        OLD_PID=$(cat "$FRONTEND_PID_FILE")
         if ps -p "$OLD_PID" > /dev/null 2>&1; then
-            echo -e "${YELLOW}⚠️  服务已在运行中 (PID: $OLD_PID)${NC}"
+            echo -e "${YELLOW}⚠️  前端服务已在运行中 (PID: $OLD_PID)${NC}"
             echo -e "${YELLOW}请先停止服务: $0 stop${NC}"
             exit 1
         else
-            # PID文件存在但进程不存在，清理PID文件
-            rm -f "$PID_FILE"
+            rm -f "$FRONTEND_PID_FILE"
         fi
     fi
     
-    check_sudo $PORT
-    check_port $PORT
-    check_dependencies
-    install_dependencies
-    build_production
+    # 检查后端是否已经在运行
+    if [ "$ENABLE_BACKEND" == "true" ] && [ -f "$BACKEND_PID_FILE" ]; then
+        OLD_PID=$(cat "$BACKEND_PID_FILE")
+        if ps -p "$OLD_PID" > /dev/null 2>&1; then
+            echo -e "${YELLOW}⚠️  后端服务已在运行中 (PID: $OLD_PID)${NC}"
+            echo -e "${YELLOW}请先停止服务: $0 stop${NC}"
+            exit 1
+        else
+            rm -f "$BACKEND_PID_FILE"
+        fi
+    fi
     
+    # 检查端口
+    if [ "$ENABLE_FRONTEND" == "true" ]; then
+        check_sudo $FRONTEND_PORT
+        check_port $FRONTEND_PORT "frontend"
+    fi
+    
+    if [ "$ENABLE_BACKEND" == "true" ]; then
+        check_port $BACKEND_PORT "backend"
+    fi
+    
+    # 安装依赖和构建
+    if [ "$ENABLE_FRONTEND" == "true" ]; then
+        check_node_dependencies
+        install_frontend_dependencies
+        build_frontend
+    fi
+    
+    if [ "$ENABLE_BACKEND" == "true" ]; then
+        check_python_dependencies
+        install_backend_dependencies
+    fi
+    
+    # 启动服务
     if [ "$DAEMON_MODE" == "true" ]; then
-        start_daemon $PORT
+        # 后台模式：先启动后端，再启动前端
+        if [ "$ENABLE_BACKEND" == "true" ]; then
+            start_backend_daemon
+        fi
+        
+        if [ "$ENABLE_FRONTEND" == "true" ]; then
+            start_frontend_daemon
+        fi
+        
+        # 显示访问信息
+        get_local_ip
+        echo ""
+        echo -e "${GREEN}===========================================${NC}"
+        echo -e "${GREEN}         服务启动成功！${NC}"
+        echo -e "${GREEN}===========================================${NC}"
+        echo ""
+        
+        if [ "$ENABLE_FRONTEND" == "true" ]; then
+            echo -e "${BLUE}前端访问地址:${NC}"
+            echo -e "  本机: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+            if [ "$LOCAL_IP" != "localhost" ]; then
+                echo -e "  局域网: ${GREEN}http://$LOCAL_IP:$FRONTEND_PORT${NC}"
+            fi
+        fi
+        
+        if [ "$ENABLE_BACKEND" == "true" ] && [ -d "backend" ]; then
+            echo ""
+            echo -e "${BLUE}后端API地址:${NC}"
+            echo -e "  本机: ${GREEN}http://localhost:$BACKEND_PORT${NC}"
+            echo -e "  API文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+        fi
+        
+        echo ""
+        echo -e "${BLUE}服务管理:${NC}"
+        echo -e "  查看状态: ${YELLOW}$0 status${NC}"
+        echo -e "  查看前端日志: ${YELLOW}tail -f $FRONTEND_LOG_FILE${NC}"
+        if [ "$ENABLE_BACKEND" == "true" ]; then
+            echo -e "  查看后端日志: ${YELLOW}tail -f $BACKEND_LOG_FILE${NC}"
+        fi
+        echo -e "  停止服务: ${YELLOW}$0 stop${NC}"
+        echo -e "  重启服务: ${YELLOW}$0 restart${NC}"
+        echo ""
     else
-        start_foreground $PORT
+        # 前台模式：先启动后端（后台），再启动前端（前台）
+        if [ "$ENABLE_BACKEND" == "true" ]; then
+            start_backend_daemon
+        fi
+        
+        if [ "$ENABLE_FRONTEND" == "true" ]; then
+            start_frontend_foreground
+        fi
     fi
 }
 
@@ -255,10 +420,11 @@ do_start() {
 do_stop() {
     echo -e "${YELLOW}停止服务...${NC}"
     
-    if [ -f "$PID_FILE" ]; then
-        PID=$(cat "$PID_FILE")
+    # 停止前端服务
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        PID=$(cat "$FRONTEND_PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
-            echo -e "${YELLOW}停止进程 (PID: $PID)...${NC}"
+            echo -e "${YELLOW}停止前端服务 (PID: $PID)...${NC}"
             kill "$PID"
             
             # 等待进程结束
@@ -271,31 +437,71 @@ do_stop() {
             
             # 如果进程仍在运行，强制终止
             if ps -p "$PID" > /dev/null 2>&1; then
-                echo -e "${YELLOW}强制终止进程...${NC}"
+                echo -e "${YELLOW}强制终止前端进程...${NC}"
                 kill -9 "$PID" 2>/dev/null || true
             fi
             
-            rm -f "$PID_FILE"
-            echo -e "${GREEN}✓ 服务已停止${NC}"
+            rm -f "$FRONTEND_PID_FILE"
+            echo -e "${GREEN}✓ 前端服务已停止${NC}"
         else
-            echo -e "${YELLOW}进程不存在 (PID: $PID)${NC}"
-            rm -f "$PID_FILE"
+            echo -e "${YELLOW}前端进程不存在 (PID: $PID)${NC}"
+            rm -f "$FRONTEND_PID_FILE"
         fi
     else
-        echo -e "${YELLOW}服务未运行（未找到PID文件）${NC}"
-        
-        # 尝试查找并停止serve进程
-        SERVE_PID=$(pgrep -f "serve.*dist" 2>/dev/null || true)
-        if [ -n "$SERVE_PID" ]; then
-            echo -e "${YELLOW}发现serve进程 (PID: $SERVE_PID)，正在停止...${NC}"
-            kill $SERVE_PID 2>/dev/null || true
-            echo -e "${GREEN}✓ 已停止serve进程${NC}"
-        fi
+        echo -e "${YELLOW}前端服务未运行（未找到PID文件）${NC}"
     fi
     
-    # 清理日志文件（可选）
-    if [ -f "$LOG_FILE" ]; then
-        echo -e "${YELLOW}日志文件保留在: $LOG_FILE${NC}"
+    # 停止后端服务
+    if [ -f "$BACKEND_PID_FILE" ]; then
+        PID=$(cat "$BACKEND_PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo -e "${YELLOW}停止后端服务 (PID: $PID)...${NC}"
+            kill "$PID"
+            
+            # 等待进程结束
+            for i in {1..10}; do
+                if ! ps -p "$PID" > /dev/null 2>&1; then
+                    break
+                fi
+                sleep 1
+            done
+            
+            # 如果进程仍在运行，强制终止
+            if ps -p "$PID" > /dev/null 2>&1; then
+                echo -e "${YELLOW}强制终止后端进程...${NC}"
+                kill -9 "$PID" 2>/dev/null || true
+            fi
+            
+            rm -f "$BACKEND_PID_FILE"
+            echo -e "${GREEN}✓ 后端服务已停止${NC}"
+        else
+            echo -e "${YELLOW}后端进程不存在 (PID: $PID)${NC}"
+            rm -f "$BACKEND_PID_FILE"
+        fi
+    else
+        echo -e "${YELLOW}后端服务未运行（未找到PID文件）${NC}"
+    fi
+    
+    # 尝试查找并停止其他相关进程
+    SERVE_PID=$(pgrep -f "serve.*dist" 2>/dev/null || true)
+    if [ -n "$SERVE_PID" ]; then
+        echo -e "${YELLOW}发现serve进程 (PID: $SERVE_PID)，正在停止...${NC}"
+        kill $SERVE_PID 2>/dev/null || true
+        echo -e "${GREEN}✓ 已停止serve进程${NC}"
+    fi
+    
+    UVICORN_PID=$(pgrep -f "uvicorn.*main:app" 2>/dev/null || true)
+    if [ -n "$UVICORN_PID" ]; then
+        echo -e "${YELLOW}发现uvicorn进程 (PID: $UVICORN_PID)，正在停止...${NC}"
+        kill $UVICORN_PID 2>/dev/null || true
+        echo -e "${GREEN}✓ 已停止uvicorn进程${NC}"
+    fi
+    
+    # 保留日志文件信息
+    if [ -f "$FRONTEND_LOG_FILE" ] || [ -f "$BACKEND_LOG_FILE" ]; then
+        echo -e "${YELLOW}日志文件保留在:${NC}"
+        [ -f "$FRONTEND_LOG_FILE" ] && echo -e "  前端: $FRONTEND_LOG_FILE"
+        [ -f "$BACKEND_LOG_FILE" ] && echo -e "  后端: $BACKEND_LOG_FILE"
     fi
 }
 
@@ -314,10 +520,12 @@ do_status() {
     echo -e "${BLUE}===========================================${NC}"
     echo ""
     
-    if [ -f "$PID_FILE" ]; then
-        PID=$(cat "$PID_FILE")
+    # 检查前端服务状态
+    echo -e "${BLUE}前端服务状态:${NC}"
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        PID=$(cat "$FRONTEND_PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ 服务运行中${NC}"
+            echo -e "  ${GREEN}✓ 运行中${NC}"
             echo -e "  PID: ${GREEN}$PID${NC}"
             
             # 获取端口信息
@@ -326,46 +534,92 @@ do_status() {
                 echo -e "  端口: ${GREEN}$PORT_INFO${NC}"
             fi
             
-            # 获取进程信息
-            echo -e "  进程信息:"
-            ps -p $PID -o pid,ppid,user,%cpu,%mem,etime,command | sed 's/^/    /'
+            # 显示日志文件信息
+            if [ -f "$FRONTEND_LOG_FILE" ]; then
+                echo -e "  日志: $FRONTEND_LOG_FILE"
+            fi
+        else
+            echo -e "  ${YELLOW}⚠️  PID文件存在但进程未运行${NC}"
+            echo -e "  过期PID: $PID"
+        fi
+    else
+        echo -e "  ${RED}✗ 未运行${NC}"
+    fi
+    
+    # 检查后端服务状态
+    echo ""
+    echo -e "${BLUE}后端服务状态:${NC}"
+    if [ ! -d "backend" ]; then
+        echo -e "  ${YELLOW}后端目录不存在${NC}"
+    elif [ -f "$BACKEND_PID_FILE" ]; then
+        PID=$(cat "$BACKEND_PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓ 运行中${NC}"
+            echo -e "  PID: ${GREEN}$PID${NC}"
             
-            # 显示访问地址
-            get_local_ip
-            echo ""
-            echo -e "${BLUE}访问地址:${NC}"
-            echo -e "  本机: ${GREEN}http://localhost:${PORT_INFO:-80}${NC}"
-            if [ "$LOCAL_IP" != "localhost" ]; then
-                echo -e "  局域网: ${GREEN}http://$LOCAL_IP:${PORT_INFO:-80}${NC}"
+            # 获取端口信息
+            PORT_INFO=$(lsof -p $PID -P 2>/dev/null | grep LISTEN | awk '{print $9}' | cut -d: -f2 | head -1)
+            if [ -n "$PORT_INFO" ]; then
+                echo -e "  端口: ${GREEN}$PORT_INFO${NC}"
+                echo -e "  API文档: ${GREEN}http://localhost:$PORT_INFO/docs${NC}"
             fi
             
             # 显示日志文件信息
-            if [ -f "$LOG_FILE" ]; then
-                echo ""
-                echo -e "${BLUE}日志文件:${NC} $LOG_FILE"
-                echo -e "${YELLOW}查看日志: tail -f $LOG_FILE${NC}"
-                
-                # 显示最后几行日志
-                echo ""
-                echo -e "${BLUE}最近日志:${NC}"
-                tail -5 "$LOG_FILE" 2>/dev/null | sed 's/^/  /'
+            if [ -f "$BACKEND_LOG_FILE" ]; then
+                echo -e "  日志: $BACKEND_LOG_FILE"
             fi
         else
-            echo -e "${YELLOW}⚠️  PID文件存在但进程未运行${NC}"
+            echo -e "  ${YELLOW}⚠️  PID文件存在但进程未运行${NC}"
             echo -e "  过期PID: $PID"
-            echo -e "  ${YELLOW}建议运行: $0 start${NC}"
         fi
     else
-        echo -e "${RED}✗ 服务未运行${NC}"
-        echo -e "  ${YELLOW}启动服务: $0 start${NC}"
-        
-        # 检查是否有其他serve进程
-        SERVE_PID=$(pgrep -f "serve.*dist" 2>/dev/null || true)
-        if [ -n "$SERVE_PID" ]; then
-            echo ""
-            echo -e "${YELLOW}⚠️  发现其他serve进程:${NC}"
-            ps -p $SERVE_PID -o pid,ppid,user,command | sed 's/^/  /'
+        echo -e "  ${RED}✗ 未运行${NC}"
+    fi
+    
+    # 显示访问地址
+    get_local_ip
+    echo ""
+    echo -e "${BLUE}访问地址:${NC}"
+    
+    # 前端地址
+    if [ -f "$FRONTEND_PID_FILE" ]; then
+        PID=$(cat "$FRONTEND_PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            PORT_INFO=$(lsof -p $PID -P 2>/dev/null | grep LISTEN | awk '{print $9}' | cut -d: -f2 | head -1)
+            if [ -n "$PORT_INFO" ]; then
+                echo -e "  前端本机: ${GREEN}http://localhost:${PORT_INFO}${NC}"
+                if [ "$LOCAL_IP" != "localhost" ]; then
+                    echo -e "  前端局域网: ${GREEN}http://$LOCAL_IP:${PORT_INFO}${NC}"
+                fi
+            fi
         fi
+    fi
+    
+    # 后端地址
+    if [ -f "$BACKEND_PID_FILE" ]; then
+        PID=$(cat "$BACKEND_PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            PORT_INFO=$(lsof -p $PID -P 2>/dev/null | grep LISTEN | awk '{print $9}' | cut -d: -f2 | head -1)
+            if [ -n "$PORT_INFO" ]; then
+                echo -e "  后端API: ${GREEN}http://localhost:${PORT_INFO}${NC}"
+                echo -e "  API文档: ${GREEN}http://localhost:${PORT_INFO}/docs${NC}"
+            fi
+        fi
+    fi
+    
+    # 显示管理命令
+    echo ""
+    echo -e "${BLUE}管理命令:${NC}"
+    echo -e "  启动服务: ${YELLOW}$0 start${NC}"
+    echo -e "  停止服务: ${YELLOW}$0 stop${NC}"
+    echo -e "  重启服务: ${YELLOW}$0 restart${NC}"
+    
+    # 显示日志查看命令
+    if [ -f "$FRONTEND_LOG_FILE" ] || [ -f "$BACKEND_LOG_FILE" ]; then
+        echo ""
+        echo -e "${BLUE}查看日志:${NC}"
+        [ -f "$FRONTEND_LOG_FILE" ] && echo -e "  前端日志: ${YELLOW}tail -f $FRONTEND_LOG_FILE${NC}"
+        [ -f "$BACKEND_LOG_FILE" ] && echo -e "  后端日志: ${YELLOW}tail -f $BACKEND_LOG_FILE${NC}"
     fi
     
     echo ""
@@ -386,9 +640,21 @@ DAEMON_MODE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --port)
-            PORT="$2"
+        --frontend-port)
+            FRONTEND_PORT="$2"
             shift 2
+            ;;
+        --backend-port)
+            BACKEND_PORT="$2"
+            shift 2
+            ;;
+        --frontend-only)
+            ENABLE_BACKEND=false
+            shift
+            ;;
+        --backend-only)
+            ENABLE_FRONTEND=false
+            shift
             ;;
         --build)
             FORCE_BUILD=true
