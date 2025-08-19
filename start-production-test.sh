@@ -85,7 +85,7 @@ start_service() {
     echo ""
     
     # 启动服务器
-    npx serve -s dist -l 8080 --host 0.0.0.0
+    npx serve -s dist -l 8080
 }
 
 # 主执行流程
