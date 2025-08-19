@@ -1,4 +1,3 @@
-import React from 'react';
 import { ServiceCard } from './ServiceCard';
 import type { Service, ViewMode } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';

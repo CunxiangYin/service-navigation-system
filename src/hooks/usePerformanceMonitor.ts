@@ -48,7 +48,7 @@ export function useFPSMonitor(enabled = false) {
   const [fps, setFps] = useState<number>(0);
   const frameCount = useRef<number>(0);
   const lastTime = useRef<number>(performance.now());
-  const animationId = useRef<number>();
+  const animationId = useRef<number>(0);
 
   const measureFPS = useCallback(() => {
     if (!enabled) return;

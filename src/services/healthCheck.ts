@@ -146,7 +146,7 @@ class HealthCheckService {
     this.checkAllServices(services);
     
     // Set up interval
-    this.intervalId = setInterval(() => {
+    this.intervalId = window.setInterval(() => {
       this.checkAllServices(services);
     }, this.checkInterval);
   }

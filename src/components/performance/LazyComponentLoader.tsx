@@ -158,7 +158,7 @@ export function LazyContainer({
   rootMargin = '50px',
   className,
 }: LazyContainerProps) {
-  const [isVisible, setIsVisible] = React.useState(false);
+  const [, setIsVisible] = React.useState(false);
   const [hasBeenVisible, setHasBeenVisible] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 

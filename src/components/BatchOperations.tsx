@@ -1,4 +1,5 @@
-import React from 'react';
+import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -22,14 +23,14 @@ export function BatchOperations({
   services,
   categories,
   selectedIds,
-  onSelectService,
+  onSelectService: _onSelectService,
   onSelectAll,
   onClearSelection,
   onBatchDelete,
   onBatchMove,
   className,
 }: BatchOperationsProps) {
-  const [showMoveMenu, setShowMoveMenu] = React.useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const selectedCount = selectedIds.size;
   const allSelected = services.length > 0 && selectedCount === services.length;
 
@@ -131,7 +132,7 @@ export function BatchOperations({
 }
 
 export function SelectableServiceCard({
-  service,
+  service: _service,
   selected,
   onSelect,
   children,
@@ -139,7 +140,7 @@ export function SelectableServiceCard({
   service: Service;
   selected: boolean;
   onSelect: (selected: boolean) => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="relative">
