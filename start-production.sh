@@ -174,11 +174,11 @@ install_frontend_dependencies() {
 build_frontend() {
     echo -e "${YELLOW}检查前端生产构建...${NC}"
     
-    if [ ! -d "dist" ] || [ "$FORCE_BUILD" == "true" ]; then
+    if [ ! -d "build" ] || [ "$FORCE_BUILD" == "true" ]; then
         echo -e "${YELLOW}构建前端生产版本...${NC}"
         npm run build
         
-        if [ ! -d "dist" ]; then
+        if [ ! -d "build" ]; then
             echo -e "${RED}错误: 前端构建失败${NC}"
             exit 1
         fi
@@ -256,7 +256,7 @@ start_frontend_daemon() {
     echo -e "${YELLOW}启动前端服务 (端口 $FRONTEND_PORT)...${NC}"
     
     # 启动前端服务
-    nohup npx serve -s dist -l $FRONTEND_PORT > "$FRONTEND_LOG_FILE" 2>&1 &
+    nohup npx serve -s build -l $FRONTEND_PORT > "$FRONTEND_LOG_FILE" 2>&1 &
     local PID=$!
     
     # 保存PID
@@ -309,7 +309,7 @@ start_frontend_foreground() {
     echo ""
     
     # 启动前端服务器
-    npx serve -s dist -l $FRONTEND_PORT
+    npx serve -s build -l $FRONTEND_PORT
 }
 
 # 启动服务
@@ -483,7 +483,7 @@ do_stop() {
     fi
     
     # 尝试查找并停止其他相关进程
-    SERVE_PID=$(pgrep -f "serve.*dist" 2>/dev/null || true)
+    SERVE_PID=$(pgrep -f "serve.*build" 2>/dev/null || true)
     if [ -n "$SERVE_PID" ]; then
         echo -e "${YELLOW}发现serve进程 (PID: $SERVE_PID)，正在停止...${NC}"
         kill $SERVE_PID 2>/dev/null || true
