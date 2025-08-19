@@ -7,68 +7,29 @@ import { VirtualizedServiceGrid } from '@/components/service/VirtualizedServiceG
 import { AddServiceDialog } from '@/components/dialogs/AddServiceDialog';
 import { ImportExportDialog } from '@/components/dialogs/ImportExportDialog';
 import { ShortcutsDialog } from '@/components/dialogs/ShortcutsDialog';
+import { SyncSettingsDialog } from '@/components/dialogs/SyncSettingsDialog';
 import { HealthCheckDashboard } from '@/components/HealthCheckDashboard';
 import { BatchOperations } from '@/components/BatchOperations';
 import { CodeSplitBoundary } from '@/components/performance/LazyComponentLoader';
 import { PerformanceDashboard } from '@/components/performance/PerformanceDashboard';
+import { BackendStatus } from '@/components/BackendStatus';
+import { EmptyState } from '@/components/EmptyState';
 import type { Service, Category, ViewMode } from '@/types';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePerformanceMonitor, usePerformanceBudget } from '@/hooks/usePerformanceMonitor';
 import { preloadResources } from '@/hooks/useLazyLoading';
+import { dataSyncService } from '@/services/dataSync';
+import { useToast } from '@/hooks/useToast';
+import { Toaster } from '@/components/ui/toaster';
 
-// Default categories
-const defaultCategories: Category[] = [
-  { id: '1', name: '开发环境', icon: 'code', count: 0 },
-  { id: '2', name: '测试环境', icon: 'flask', count: 0 },
-  { id: '3', name: '生产环境', icon: 'server', count: 0 },
-  { id: '4', name: '监控系统', icon: 'activity', count: 0 },
-  { id: '5', name: '数据库', icon: 'database', count: 0 },
-];
-
-// Sample services for demo
-const sampleServices: Service[] = [
-  {
-    id: '1',
-    name: '开发API',
-    url: 'http://192.168.1.100:3000',
-    description: '主开发API服务器',
-    category: '1',
-    status: 'online',
-    tags: ['API', 'REST'],
-  },
-  {
-    id: '2',
-    name: '测试数据库',
-    url: 'http://192.168.1.101:5432',
-    description: 'PostgreSQL测试数据库',
-    category: '2',
-    status: 'online',
-    tags: ['数据库', 'PostgreSQL'],
-  },
-  {
-    id: '3',
-    name: '生产服务器',
-    url: 'https://api.production.local',
-    description: '生产环API端点',
-    category: '3',
-    status: 'online',
-    tags: ['生产环境', 'API'],
-  },
-  {
-    id: '4',
-    name: 'Grafana监控面板',
-    url: 'http://192.168.1.110:3000',
-    description: '系统监控仪表板',
-    category: '4',
-    status: 'online',
-    tags: ['监控', '指标'],
-  },
-];
+// 空的初始数据，将从后端加载
+const emptyCategories: Category[] = [];
+const emptyServices: Service[] = [];
 
 function App() {
-  const [services, setServices] = useLocalStorage<Service[]>('nav_services', sampleServices);
-  const [categories, setCategories] = useLocalStorage<Category[]>('nav_categories', defaultCategories);
+  const [services, setServicesLocal] = useLocalStorage<Service[]>('service-nav-services', emptyServices);
+  const [categories, setCategoriesLocal] = useLocalStorage<Category[]>('service-nav-categories', emptyCategories);
   const [mode, setMode] = useState<ViewMode>('view');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -80,7 +41,67 @@ function App() {
   const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(new Set());
   const [batchMode, setBatchMode] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
+  const [syncSettingsOpen, setSyncSettingsOpen] = useState(false);
   const [useVirtualization, setUseVirtualization] = useState(services.length > 50);
+  const { toast } = useToast();
+
+  // 包装 setServices 以支持数据同步
+  const setServices = async (newServices: Service[] | ((prev: Service[]) => Service[])) => {
+    const actualServices = typeof newServices === 'function' ? newServices(services) : newServices;
+    
+    // 先尝试同步到后端，成功后才更新本地
+    try {
+      await dataSyncService.broadcastUpdate('services', actualServices);
+      setServicesLocal(actualServices);
+      
+      // 显示成功提示
+      toast({
+        variant: "success",
+        title: "✅ 保存成功",
+        description: "数据已成功同步到后端服务器",
+      });
+    } catch (error) {
+      console.error('更新服务失败:', error);
+      
+      // 显示错误提示
+      toast({
+        variant: "destructive",
+        title: "❌ 保存失败",
+        description: error instanceof Error ? error.message : "无法连接到后端服务",
+      });
+      
+      // 不更新本地存储，保持数据一致性
+    }
+  };
+
+  // 包装 setCategories 以支持数据同步
+  const setCategories = async (newCategories: Category[] | ((prev: Category[]) => Category[])) => {
+    const actualCategories = typeof newCategories === 'function' ? newCategories(categories) : newCategories;
+    
+    // 先尝试同步到后端，成功后才更新本地
+    try {
+      await dataSyncService.broadcastUpdate('categories', actualCategories);
+      setCategoriesLocal(actualCategories);
+      
+      // 显示成功提示
+      toast({
+        variant: "success",
+        title: "✅ 保存成功",
+        description: "分类已成功同步到后端服务器",
+      });
+    } catch (error) {
+      console.error('更新分类失败:', error);
+      
+      // 显示错误提示
+      toast({
+        variant: "destructive",
+        title: "❌ 保存失败",
+        description: error instanceof Error ? error.message : "无法连接到后端服务",
+      });
+      
+      // 不更新本地存储，保持数据一致性
+    }
+  };
 
   // 性能监控
   const { startMeasure, endMeasure } = usePerformanceMonitor('App');
@@ -90,13 +111,51 @@ function App() {
     fps: 55,
   });
 
+  // 监听数据同步
+  useEffect(() => {
+    const unsubscribe = dataSyncService.onSync((data) => {
+      if (data.type === 'services') {
+        setServicesLocal(data.data);
+      } else if (data.type === 'categories') {
+        setCategoriesLocal(data.data);
+      }
+    });
+
+    // 从后端加载数据 - 这是唯一的数据源
+    const loadData = async () => {
+      try {
+        const backendData = await dataSyncService.loadFromBackend();
+        if (backendData) {
+          setServicesLocal(backendData.services || []);
+          setCategoriesLocal(backendData.categories || []);
+          console.log('从后端加载数据成功', backendData);
+        } else {
+          // 如果后端没有数据，使用空数据
+          setServicesLocal([]);
+          setCategoriesLocal([]);
+        }
+      } catch (error) {
+        console.error('加载后端数据失败:', error);
+        // 保持空数据，不使用任何默认值
+        setServicesLocal([]);
+        setCategoriesLocal([]);
+      }
+    };
+
+    loadData();
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Update category counts
   useEffect(() => {
     const updatedCategories = categories.map((category) => ({
       ...category,
       count: services.filter((service) => service.category === category.id).length,
     }));
-    setCategories(updatedCategories);
+    setCategoriesLocal(updatedCategories);
   }, [services]);
 
   // Theme management
@@ -349,6 +408,7 @@ function App() {
                 handleClearSelection();
               }
             }}
+            onSyncSettings={() => setSyncSettingsOpen(true)}
           />
         }
         sidebar={
@@ -365,6 +425,7 @@ function App() {
         sidebarOpen={sidebarOpen}
       >
         <div className="space-y-6">
+          <BackendStatus />
           <HealthCheckDashboard services={services} />
           {batchMode && mode === 'edit' && (
             <BatchOperations
@@ -379,7 +440,17 @@ function App() {
             />
           )}
           <CodeSplitBoundary>
-            {useVirtualization ? (
+            {services.length === 0 || categories.length === 0 ? (
+              <EmptyState
+                hasCategories={categories.length > 0}
+                onAddCategory={handleAddCategory}
+                onAddService={() => {
+                  setEditingService(null);
+                  setDialogOpen(true);
+                }}
+                mode={mode}
+              />
+            ) : useVirtualization ? (
               <VirtualizedServiceGrid
                 services={filteredServices}
                 mode={mode}
@@ -433,7 +504,14 @@ function App() {
         onOpenChange={setShortcutsDialogOpen}
       />
 
+      <SyncSettingsDialog
+        open={syncSettingsOpen}
+        onOpenChange={setSyncSettingsOpen}
+      />
+
       <PerformanceDashboard enabled={import.meta.env.DEV} />
+      
+      <Toaster />
     </>
   );
 }

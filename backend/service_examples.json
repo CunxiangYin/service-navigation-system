@@ -1,0 +1,95 @@
+{
+  "description": "服务卡片格式示例 - 这些是可以添加的服务格式参考",
+  "examples": [
+    {
+      "name": "开发API服务器",
+      "url": "http://192.168.1.100:3000",
+      "description": "主开发环境的API服务器",
+      "category": "1",
+      "tags": ["API", "REST", "开发"]
+    },
+    {
+      "name": "Jenkins CI/CD",
+      "url": "http://jenkins.local:8080",
+      "description": "持续集成和部署平台",
+      "category": "7",
+      "tags": ["CI/CD", "自动化", "构建"]
+    },
+    {
+      "name": "MySQL数据库",
+      "url": "mysql://192.168.1.50:3306",
+      "description": "主数据库服务器",
+      "category": "5",
+      "tags": ["数据库", "MySQL", "存储"]
+    },
+    {
+      "name": "Grafana监控",
+      "url": "http://grafana.local:3000",
+      "description": "系统性能监控仪表板",
+      "category": "4",
+      "tags": ["监控", "可视化", "指标"]
+    },
+    {
+      "name": "GitLab代码仓库",
+      "url": "http://gitlab.local",
+      "description": "内部代码版本管理系统",
+      "category": "7",
+      "tags": ["Git", "版本控制", "代码管理"]
+    },
+    {
+      "name": "Swagger API文档",
+      "url": "http://api-docs.local/swagger",
+      "description": "API接口文档",
+      "category": "6",
+      "tags": ["文档", "API", "Swagger"]
+    },
+    {
+      "name": "生产负载均衡器",
+      "url": "https://lb.production.com",
+      "description": "生产环境负载均衡入口",
+      "category": "3",
+      "tags": ["负载均衡", "生产", "高可用"]
+    },
+    {
+      "name": "Redis缓存服务",
+      "url": "redis://192.168.1.60:6379",
+      "description": "分布式缓存服务",
+      "category": "5",
+      "tags": ["缓存", "Redis", "NoSQL"]
+    },
+    {
+      "name": "Kibana日志查看",
+      "url": "http://kibana.local:5601",
+      "description": "ELK日志分析平台",
+      "category": "4",
+      "tags": ["日志", "分析", "ELK"]
+    },
+    {
+      "name": "测试环境API",
+      "url": "http://test-api.local:8000",
+      "description": "测试环境API服务",
+      "category": "2",
+      "tags": ["测试", "API", "QA"]
+    }
+  ],
+  "format": {
+    "id": "自动生成的唯一ID",
+    "name": "服务名称（必填）",
+    "url": "服务访问地址（必填）",
+    "description": "服务描述（可选）",
+    "category": "所属分类ID（必填）",
+    "status": "在线状态：online|offline|maintenance|checking|error|warning（可选，默认online）",
+    "tags": "标签数组（可选）",
+    "order": "排序顺序（可选，默认0）"
+  },
+  "categories": {
+    "1": "开发环境",
+    "2": "测试环境",
+    "3": "生产环境",
+    "4": "监控系统",
+    "5": "数据库",
+    "6": "文档工具",
+    "7": "开发工具",
+    "8": "其他服务"
+  }
+}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>清理本地存储</title>
+    <meta charset="utf-8">
+</head>
+<body>
+    <h1>清理服务导航系统本地存储</h1>
+    <button onclick="clearStorage()">清理本地存储</button>
+    <div id="result"></div>
+    
+    <script>
+        function clearStorage() {
+            // 清理服务导航相关的所有 localStorage
+            const keys = [
+                'service-nav-services',
+                'service-nav-categories',
+                'service-nav-backend-config',
+                'nav_services',
+                'nav_categories'
+            ];
+            
+            keys.forEach(key => {
+                if (localStorage.getItem(key)) {
+                    localStorage.removeItem(key);
+                    console.log(`已删除: ${key}`);
+                }
+            });
+            
+            document.getElementById('result').innerHTML = '<p style="color: green;">✅ 本地存储已清理</p>';
+        }
+        
+        // 显示当前存储的内容
+        console.log('当前 localStorage 内容:');
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes('nav')) {
+                console.log(key, localStorage.getItem(key));
+            }
+        }
+    </script>
+</body>
+</html>

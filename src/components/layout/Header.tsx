@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ViewMode } from '@/types';
-import { Search, Grid, Edit3, Menu, Moon, Sun, FileJson, CheckSquare } from 'lucide-react';
+import { Search, Grid, Edit3, Menu, Moon, Sun, FileJson, CheckSquare, Cloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface HeaderProps {
@@ -15,6 +15,7 @@ interface HeaderProps {
   onImportExport?: () => void;
   batchMode?: boolean;
   onBatchModeToggle?: () => void;
+  onSyncSettings?: () => void;
 }
 
 export function Header({
@@ -28,6 +29,7 @@ export function Header({
   onImportExport,
   batchMode = false,
   onBatchModeToggle,
+  onSyncSettings,
 }: HeaderProps) {
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -96,6 +98,7 @@ export function Header({
             variant="ghost"
             size="icon"
             onClick={onImportExport}
+            title="导入/导出"
           >
             <FileJson className="h-5 w-5" />
           </Button>
@@ -103,7 +106,17 @@ export function Header({
           <Button
             variant="ghost"
             size="icon"
+            onClick={onSyncSettings}
+            title="同步设置"
+          >
+            <Cloud className="h-5 w-5" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onThemeToggle}
+            title="切换主题"
           >
             {isDarkMode ? (
               <Sun className="h-5 w-5" />
