@@ -203,7 +203,7 @@ start_service() {
     echo ""
     
     # 启动服务器
-    serve -s dist -l 80 --host 0.0.0.0
+    serve -s dist -l 80
 }
 
 # 主执行流程

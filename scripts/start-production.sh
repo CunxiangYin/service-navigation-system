@@ -106,7 +106,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$PROJECT_ROOT
-ExecStart=/usr/bin/npx serve -s dist -l 80 --host 0.0.0.0
+ExecStart=/usr/bin/npx serve -s dist -l 80
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
